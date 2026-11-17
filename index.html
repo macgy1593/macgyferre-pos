@@ -9,6 +9,34 @@
 </head>
 <body class="bg-slate-100 text-slate-800 font-sans min-h-screen flex flex-col">
 
+  <!-- PANTALLA DE INICIO DE SESIÓN (FIREBASE AUTH) -->
+  <div id="pantalla-login" class="fixed inset-0 bg-slate-900 z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6">
+      <div class="text-center mb-6">
+        <span class="bg-amber-500 text-slate-900 font-black px-3 py-1.5 rounded-lg text-lg">MF</span>
+        <h2 class="text-xl font-black text-slate-800 mt-3">MacgyFerre POS</h2>
+        <p class="text-xs text-slate-500">Ingresa tus credenciales según tu puesto</p>
+      </div>
+      <form id="form-login" class="space-y-4">
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Correo del Empleado</label>
+          <input type="email" id="login-email" required placeholder="ejemplo@macgyferre.com"
+            class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Contraseña</label>
+          <input type="password" id="login-password" required placeholder="••••••••"
+            class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500" />
+        </div>
+        <p id="login-error" class="text-xs text-red-600 font-semibold hidden"></p>
+        <button type="submit" id="btn-login"
+          class="w-full bg-amber-500 hover:bg-amber-600 text-slate-900 font-black py-2.5 rounded-lg transition shadow-sm">
+          INGRESAR AL SISTEMA
+        </button>
+      </form>
+    </div>
+  </div>
+
   <!-- BARRA SUPERIOR (NAVBAR) -->
   <header class="bg-slate-900 text-white shadow-md">
     <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
@@ -20,12 +48,15 @@
         </div>
       </div>
 
+      <!-- Puesto activo y botón de salida -->
       <div class="flex items-center gap-3">
-        <label for="select-rol" class="text-xs text-slate-300 font-semibold uppercase">Rol activo:</label>
-        <select id="select-rol" class="bg-slate-800 border border-slate-700 text-sm rounded px-3 py-1.5 text-amber-400 font-bold focus:outline-none">
-          <option value="admin">Administrador General</option>
-          <option value="vendedor">Vendedor Mostrador</option>
-        </select>
+        <span id="badge-puesto" class="bg-slate-800 text-amber-400 text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-700">
+          Cargando puesto...
+        </span>
+        <button type="button" id="btn-cerrar-sesion"
+          class="bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition">
+          Salir
+        </button>
       </div>
     </div>
 
@@ -48,7 +79,7 @@
     </nav>
   </header>
 
-  <!-- CONTENEDOR PRINCIPAL DE VISTAS -->
+  <!-- CONTENIDO PRINCIPAL DE VISTAS -->
   <main class="max-w-7xl w-full mx-auto px-4 py-6 flex-1">
 
     <!-- MÓDULO 1: CAJA RÁPIDA (POS) -->
@@ -105,7 +136,7 @@
       </div>
     </section>
 
-    <!-- MÓDULO 2: INVENTARIO (Oculto al inicio con 'hidden') -->
+    <!-- MÓDULO 2: INVENTARIO -->
     <section id="vista-inventario" class="vista-modulo hidden bg-white p-6 rounded-xl shadow-sm border border-slate-200">
       <div class="flex flex-wrap justify-between items-center gap-4 mb-6">
         <div>
@@ -145,14 +176,14 @@
       </div>
     </section>
 
-    <!-- MÓDULO 3: CLIENTES Y FIADOS (Oculto al inicio con 'hidden') -->
+    <!-- MÓDULO 3: CLIENTES Y FIADOS -->
     <section id="vista-fiados" class="vista-modulo hidden bg-white p-6 rounded-xl shadow-sm border border-slate-200">
       <h2 class="text-xl font-bold text-slate-800 mb-1">Cuentas por Cobrar (Fiados)</h2>
       <p class="text-sm text-slate-500 mb-6">Control de créditos otorgados en mostrador y registro de abonos</p>
       <div id="lista-fiados" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
     </section>
 
-    <!-- MÓDULO 4: CIERRE DE CAJA Y REPORTES (Oculto al inicio con 'hidden') -->
+    <!-- MÓDULO 4: CIERRE DE CAJA Y REPORTES -->
     <section id="vista-reportes" class="vista-modulo hidden space-y-6">
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
@@ -183,7 +214,7 @@
   </main>
 
   <!-- MODAL DE TICKET DE VENTA -->
-  <div id="modal-ticket" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+  <div id="modal-ticket" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-40">
     <div class="bg-white w-full max-w-sm p-6 rounded-lg shadow-xl font-mono text-xs">
       <div class="text-center border-b border-dashed pb-3 mb-3">
         <h3 class="font-bold text-base">MACGYFERRE FERRETERÍA</h3>
@@ -203,6 +234,6 @@
     </div>
   </div>
 
-  <script type="module" src="js/app.js"></script>>
+  <script type="module" src="js/app.js"></script>
 </body>
 </html>
