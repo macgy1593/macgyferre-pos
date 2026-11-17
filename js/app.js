@@ -1,14 +1,20 @@
-import { db } from "./firebase-config.js";
+import { db, auth } from "./firebase-config.js";
 import {
   collection,
   addDoc,
   doc,
+  getDoc,
   updateDoc,
   onSnapshot,
   query,
   orderBy,
   getDocs
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import {
+  signInWithEmailAndPassword,
+  onAuthStateChanged,
+  signOut
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 // =========================================================
 // 1. ESTADO DE LA APLICACIÓN EN LA NUBE (FIRESTORE)
@@ -26,7 +32,8 @@ let productos = [];
 let ventas = [];
 let fiados = [];
 let carrito = [];
-let rolActual = "admin";
+let rolActual = "vendedor";
+let listenersIniciados = false;
 
 // Cargar datos semilla si la base de datos en Firestore está vacía
 async function inicializarBaseDatos() {
@@ -40,30 +47,111 @@ async function inicializarBaseDatos() {
     }
   } catch (error) {
     console.error("Error conectando con Firestore:", error);
-    alert("Verifica que Firestore Database esté activado en modo de prueba en tu consola de Firebase.");
   }
 }
 
-// Escuchadores en tiempo real (Sincronización automática)
-onSnapshot(collection(db, "productos"), (snapshot) => {
-  productos = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-  renderCatalogoPOS(document.getElementById("buscador-pos").value);
+// Iniciar escuchadores en tiempo real una vez que el usuario inicie sesión
+function iniciarEscuchadoresTiempoReal() {
+  if (listenersIniciados) return;
+  listenersIniciados = true;
+
+  onSnapshot(collection(db, "productos"), (snapshot) => {
+    productos = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderCatalogoPOS(document.getElementById("buscador-pos").value);
+    renderTablaInventario();
+  });
+
+  onSnapshot(query(collection(db, "ventas"), orderBy("timestamp", "desc")), (snapshot) => {
+    ventas = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderReportes();
+  });
+
+  onSnapshot(collection(db, "fiados"), (snapshot) => {
+    fiados = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderFiados();
+    renderReportes();
+  });
+}
+
+// =========================================================
+// 2. CONTROL DE ACCESO Y PERMISOS POR PUESTO (FIREBASE AUTH)
+// =========================================================
+function aplicarPermisosPorRol(rol, nombrePuesto) {
+  rolActual = rol;
+  const badgePuesto = document.getElementById("badge-puesto");
+  if (badgePuesto) badgePuesto.textContent = nombrePuesto;
+
+  const tabReportes = document.getElementById("tab-reportes");
+  const btnNuevoProd = document.getElementById("btn-abrir-form-producto");
+
+  if (rol === "vendedor") {
+    if (tabReportes) tabReportes.classList.add("hidden");
+    if (btnNuevoProd) btnNuevoProd.classList.add("hidden");
+    cambiarVista("pos");
+  } else {
+    if (tabReportes) tabReportes.classList.remove("hidden");
+    if (btnNuevoProd) btnNuevoProd.classList.remove("hidden");
+  }
   renderTablaInventario();
+}
+
+document.getElementById("form-login").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const email = document.getElementById("login-email").value.trim();
+  const pass = document.getElementById("login-password").value;
+  const errorEl = document.getElementById("login-error");
+  const btn = document.getElementById("btn-login");
+
+  errorEl.classList.add("hidden");
+  btn.disabled = true;
+  btn.textContent = "VERIFICANDO...";
+
+  try {
+    await signInWithEmailAndPassword(auth, email, pass);
+    e.target.reset();
+  } catch (err) {
+    console.error("Error de autenticación:", err);
+    errorEl.textContent = "Correo o contraseña incorrectos.";
+    errorEl.classList.remove("hidden");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "INGRESAR AL SISTEMA";
+  }
 });
 
-onSnapshot(query(collection(db, "ventas"), orderBy("timestamp", "desc")), (snapshot) => {
-  ventas = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-  renderReportes();
+document.getElementById("btn-cerrar-sesion").addEventListener("click", () => {
+  carrito = [];
+  renderCarrito();
+  signOut(auth);
 });
 
-onSnapshot(collection(db, "fiados"), (snapshot) => {
-  fiados = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-  renderFiados();
-  renderReportes();
+onAuthStateChanged(auth, async (user) => {
+  const pantallaLogin = document.getElementById("pantalla-login");
+  if (!user) {
+    pantallaLogin.classList.remove("hidden");
+    return;
+  }
+
+  try {
+    const perfilSnap = await getDoc(doc(db, "usuarios", user.uid));
+    if (perfilSnap.exists()) {
+      const datos = perfilSnap.data();
+      aplicarPermisosPorRol(datos.rol, datos.nombre || datos.rol.toUpperCase());
+    } else {
+      aplicarPermisosPorRol("vendedor", "Vendedor (Restringido)");
+    }
+  } catch (error) {
+    console.error("Error al leer perfil de usuario:", error);
+    aplicarPermisosPorRol("vendedor", "Vendedor");
+  }
+
+  pantallaLogin.classList.add("hidden");
+  await inicializarBaseDatos();
+  iniciarEscuchadoresTiempoReal();
 });
 
 // =========================================================
-// 2. NAVEGACIÓN ENTRE MÓDULOS Y CONTROL DE ROLES
+// 3. NAVEGACIÓN ENTRE MÓDULOS
 // =========================================================
 function cambiarVista(nombreVista) {
   if (nombreVista === "reportes" && rolActual !== "admin") {
@@ -92,24 +180,8 @@ function cambiarVista(nombreVista) {
   if (nombreVista === "reportes") renderReportes();
 }
 
-document.getElementById("select-rol").addEventListener("change", (e) => {
-  rolActual = e.target.value;
-  const tabReportes = document.getElementById("tab-reportes");
-  const btnNuevoProd = document.getElementById("btn-abrir-form-producto");
-
-  if (rolActual === "vendedor") {
-    tabReportes.classList.add("hidden");
-    btnNuevoProd.classList.add("hidden");
-    cambiarVista("pos");
-  } else {
-    tabReportes.classList.remove("hidden");
-    btnNuevoProd.classList.remove("hidden");
-  }
-  renderTablaInventario();
-});
-
 // =========================================================
-// 3. MÓDULO 1: CAJA RÁPIDA (CATÁLOGO Y CARRITO)
+// 4. MÓDULO 1: CAJA RÁPIDA (CATÁLOGO Y CARRITO)
 // =========================================================
 function renderCatalogoPOS(filtro = "") {
   const grid = document.getElementById("grid-productos-pos");
@@ -121,7 +193,7 @@ function renderCatalogoPOS(filtro = "") {
   );
 
   if (filtrados.length === 0) {
-    grid.innerHTML = `<p class="text-sm text-slate-400 col-span-full py-6 text-center">Cargando catálogo desde la nube...</p>`;
+    grid.innerHTML = `<p class="text-sm text-slate-400 col-span-full py-6 text-center">No hay productos disponibles o cargando catálogo...</p>`;
     return;
   }
 
@@ -222,7 +294,7 @@ function renderCarrito() {
 }
 
 // =========================================================
-// 4. LÓGICA DE COBRO, VUELTO Y GENERACIÓN DE TICKET EN NUBE
+// 5. LÓGICA DE COBRO, VUELTO Y GENERACIÓN DE TICKET EN NUBE
 // =========================================================
 const selectMetodoPago = document.getElementById("metodo-pago");
 const inputEfectivo = document.getElementById("input-efectivo");
@@ -329,7 +401,7 @@ document.getElementById("btn-cobrar").addEventListener("click", async () => {
     renderCarrito();
   } catch (error) {
     console.error("Error al procesar venta:", error);
-    alert("Ocurrió un error al guardar en Firestore. Revisa tu conexión.");
+    alert("Ocurrió un error al guardar en Firestore. Verifica tu sesión y conexión.");
   } finally {
     btnCobrar.disabled = false;
     btnCobrar.textContent = "COBRAR Y GENERAR TICKET";
@@ -354,7 +426,7 @@ function cerrarModalTicket() {
 }
 
 // =========================================================
-// 5. MÓDULO 2: CONTROL DE INVENTARIO EN FIRESTORE
+// 6. MÓDULO 2: CONTROL DE INVENTARIO EN FIRESTORE
 // =========================================================
 document.getElementById("btn-abrir-form-producto").addEventListener("click", () => {
   document.getElementById("form-producto").classList.toggle("hidden");
@@ -362,6 +434,11 @@ document.getElementById("btn-abrir-form-producto").addEventListener("click", () 
 
 document.getElementById("form-producto").addEventListener("submit", async (e) => {
   e.preventDefault();
+  if (rolActual !== "admin") {
+    alert("Solo el Administrador puede agregar nuevos productos.");
+    return;
+  }
+
   const nuevoProd = {
     codigo: document.getElementById("prod-codigo").value.trim().toUpperCase(),
     nombre: document.getElementById("prod-nombre").value.trim(),
@@ -379,7 +456,7 @@ document.getElementById("form-producto").addEventListener("submit", async (e) =>
 function renderTablaInventario() {
   const tbody = document.getElementById("tabla-inventario");
   const thCosto = document.querySelector(".col-costo");
-  thCosto.classList.toggle("hidden", rolActual !== "admin");
+  if (thCosto) thCosto.classList.toggle("hidden", rolActual !== "admin");
 
   tbody.innerHTML = productos.map(p => {
     const bajo = p.stock <= p.minimo;
@@ -401,7 +478,7 @@ function renderTablaInventario() {
 }
 
 // =========================================================
-// 6. MÓDULO 3: CLIENTES Y FIADOS EN FIRESTORE
+// 7. MÓDULO 3: CLIENTES Y FIADOS EN FIRESTORE
 // =========================================================
 function renderFiados() {
   const contenedor = document.getElementById("lista-fiados");
@@ -449,7 +526,7 @@ async function registrarAbono(idFiado) {
 }
 
 // =========================================================
-// 7. MÓDULO 4: CIERRE DE CAJA Y EXPORTAR EXCEL (CSV)
+// 8. MÓDULO 4: CIERRE DE CAJA Y EXPORTAR EXCEL (CSV)
 // =========================================================
 function renderReportes() {
   const totalVentas = ventas.reduce((sum, v) => sum + Number(v.total), 0);
@@ -504,6 +581,3 @@ window.cambiarVista = cambiarVista;
 window.quitarDelCarrito = quitarDelCarrito;
 window.cerrarModalTicket = cerrarModalTicket;
 window.registrarAbono = registrarAbono;
-
-// Arrancar conexión con Firestore
-inicializarBaseDatos();
