@@ -3,7 +3,12 @@ import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.2/firebas
 import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 const firebaseConfig = {
-  // tus credenciales de macgyferre-pos
+  apiKey: "PEGA_AQUI_TU_API_KEY",
+  authDomain: "macgyferre-pos.firebaseapp.com",
+  projectId: "macgyferre-pos",
+  storageBucket: "macgyferre-pos.firebasestorage.app",
+  messagingSenderId: "PEGA_AQUI_TU_SENDER_ID",
+  appId: "PEGA_AQUI_TU_APP_ID"
 };
 
 const app = initializeApp(firebaseConfig);
