@@ -1,583 +1,239 @@
-import { db, auth } from "./firebase-config.js";
-import {
-  collection,
-  addDoc,
-  doc,
-  getDoc,
-  updateDoc,
-  onSnapshot,
-  query,
-  orderBy,
-  getDocs
-} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import {
-  signInWithEmailAndPassword,
-  onAuthStateChanged,
-  signOut
-} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MacgyFerre POS — Sistema de Gestión Ferretera</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans min-h-screen flex flex-col">
 
-// =========================================================
-// 1. ESTADO DE LA APLICACIÓN EN LA NUBE (FIRESTORE)
-// =========================================================
-const productosIniciales = [
-  { codigo: "FER-001", nombre: "Saco Cemento Gris 42.5kg", costo: 68.00, precio: 78.00, stock: 45, minimo: 10 },
-  { codigo: "FER-002", nombre: "Martillo Carpintero Mango Madera", costo: 32.00, precio: 45.00, stock: 8, minimo: 5 },
-  { codigo: "FER-003", nombre: "Tubo PVC 1/2\" Agua Potable 6m", costo: 18.50, precio: 25.00, stock: 3, minimo: 10 },
-  { codigo: "FER-004", nombre: "Galón Pintura Látex Blanca", costo: 110.00, precio: 145.00, stock: 12, minimo: 4 },
-  { codigo: "FER-005", nombre: "Libra Clavo de Acero 2.5\"", costo: 6.50, precio: 9.00, stock: 30, minimo: 10 },
-  { codigo: "FER-006", nombre: "Llave Stilson 14\" Reforzada", costo: 75.00, precio: 98.00, stock: 2, minimo: 3 }
-];
-
-let productos = [];
-let ventas = [];
-let fiados = [];
-let carrito = [];
-let rolActual = "vendedor";
-let listenersIniciados = false;
-
-// Cargar datos semilla si la base de datos en Firestore está vacía
-async function inicializarBaseDatos() {
-  try {
-    const snap = await getDocs(collection(db, "productos"));
-    if (snap.empty) {
-      for (const prod of productosIniciales) {
-        await addDoc(collection(db, "productos"), prod);
-      }
-      console.log("Catálogo inicial cargado en Firestore.");
-    }
-  } catch (error) {
-    console.error("Error conectando con Firestore:", error);
-  }
-}
-
-// Iniciar escuchadores en tiempo real una vez que el usuario inicie sesión
-function iniciarEscuchadoresTiempoReal() {
-  if (listenersIniciados) return;
-  listenersIniciados = true;
-
-  onSnapshot(collection(db, "productos"), (snapshot) => {
-    productos = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-    renderCatalogoPOS(document.getElementById("buscador-pos").value);
-    renderTablaInventario();
-  });
-
-  onSnapshot(query(collection(db, "ventas"), orderBy("timestamp", "desc")), (snapshot) => {
-    ventas = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-    renderReportes();
-  });
-
-  onSnapshot(collection(db, "fiados"), (snapshot) => {
-    fiados = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-    renderFiados();
-    renderReportes();
-  });
-}
-
-// =========================================================
-// 2. CONTROL DE ACCESO Y PERMISOS POR PUESTO (FIREBASE AUTH)
-// =========================================================
-function aplicarPermisosPorRol(rol, nombrePuesto) {
-  rolActual = rol;
-  const badgePuesto = document.getElementById("badge-puesto");
-  if (badgePuesto) badgePuesto.textContent = nombrePuesto;
-
-  const tabReportes = document.getElementById("tab-reportes");
-  const btnNuevoProd = document.getElementById("btn-abrir-form-producto");
-
-  if (rol === "vendedor") {
-    if (tabReportes) tabReportes.classList.add("hidden");
-    if (btnNuevoProd) btnNuevoProd.classList.add("hidden");
-    cambiarVista("pos");
-  } else {
-    if (tabReportes) tabReportes.classList.remove("hidden");
-    if (btnNuevoProd) btnNuevoProd.classList.remove("hidden");
-  }
-  renderTablaInventario();
-}
-
-document.getElementById("form-login").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const email = document.getElementById("login-email").value.trim();
-  const pass = document.getElementById("login-password").value;
-  const errorEl = document.getElementById("login-error");
-  const btn = document.getElementById("btn-login");
-
-  errorEl.classList.add("hidden");
-  btn.disabled = true;
-  btn.textContent = "VERIFICANDO...";
-
-  try {
-    await signInWithEmailAndPassword(auth, email, pass);
-    e.target.reset();
-  } catch (err) {
-    console.error("Error de autenticación:", err);
-    errorEl.textContent = "Correo o contraseña incorrectos.";
-    errorEl.classList.remove("hidden");
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "INGRESAR AL SISTEMA";
-  }
-});
-
-document.getElementById("btn-cerrar-sesion").addEventListener("click", () => {
-  carrito = [];
-  renderCarrito();
-  signOut(auth);
-});
-
-onAuthStateChanged(auth, async (user) => {
-  const pantallaLogin = document.getElementById("pantalla-login");
-  if (!user) {
-    pantallaLogin.classList.remove("hidden");
-    return;
-  }
-
-  try {
-    const perfilSnap = await getDoc(doc(db, "usuarios", user.uid));
-    if (perfilSnap.exists()) {
-      const datos = perfilSnap.data();
-      aplicarPermisosPorRol(datos.rol, datos.nombre || datos.rol.toUpperCase());
-    } else {
-      aplicarPermisosPorRol("vendedor", "Vendedor (Restringido)");
-    }
-  } catch (error) {
-    console.error("Error al leer perfil de usuario:", error);
-    aplicarPermisosPorRol("vendedor", "Vendedor");
-  }
-
-  pantallaLogin.classList.add("hidden");
-  await inicializarBaseDatos();
-  iniciarEscuchadoresTiempoReal();
-});
-
-// =========================================================
-// 3. NAVEGACIÓN ENTRE MÓDULOS
-// =========================================================
-function cambiarVista(nombreVista) {
-  if (nombreVista === "reportes" && rolActual !== "admin") {
-    alert("Acceso denegado: Solo el Administrador General puede ver el Cierre de Caja.");
-    return;
-  }
-
-  document.querySelectorAll(".vista-modulo").forEach(sec => sec.classList.add("hidden"));
-  const vistaObjetivo = document.getElementById(`vista-${nombreVista}`);
-  if (vistaObjetivo) vistaObjetivo.classList.remove("hidden");
-
-  document.querySelectorAll(".tab-btn").forEach(btn => {
-    btn.classList.remove("bg-amber-500", "text-slate-900", "font-bold");
-    btn.classList.add("text-slate-300", "font-semibold");
-  });
-
-  const btnActivo = document.getElementById(`tab-${nombreVista}`);
-  if (btnActivo) {
-    btnActivo.classList.remove("text-slate-300", "font-semibold");
-    btnActivo.classList.add("bg-amber-500", "text-slate-900", "font-bold");
-  }
-
-  if (nombreVista === "pos") renderCatalogoPOS(document.getElementById("buscador-pos").value);
-  if (nombreVista === "inventario") renderTablaInventario();
-  if (nombreVista === "fiados") renderFiados();
-  if (nombreVista === "reportes") renderReportes();
-}
-
-// =========================================================
-// 4. MÓDULO 1: CAJA RÁPIDA (CATÁLOGO Y CARRITO)
-// =========================================================
-function renderCatalogoPOS(filtro = "") {
-  const grid = document.getElementById("grid-productos-pos");
-  grid.innerHTML = "";
-
-  const filtrados = productos.filter(p =>
-    p.nombre.toLowerCase().includes(filtro.toLowerCase()) ||
-    p.codigo.toLowerCase().includes(filtro.toLowerCase())
-  );
-
-  if (filtrados.length === 0) {
-    grid.innerHTML = `<p class="text-sm text-slate-400 col-span-full py-6 text-center">No hay productos disponibles o cargando catálogo...</p>`;
-    return;
-  }
-
-  filtrados.forEach(prod => {
-    const sinStock = prod.stock <= 0;
-    const card = document.createElement("button");
-    card.type = "button";
-    card.disabled = sinStock;
-    card.className = `text-left p-3 rounded-lg border transition flex flex-col justify-between ${
-      sinStock
-        ? "bg-slate-100 border-slate-200 opacity-50 cursor-not-allowed"
-        : "bg-slate-50 hover:bg-amber-50 border-slate-200 hover:border-amber-400 shadow-sm"
-    }`;
-
-    card.innerHTML = `
-      <div>
-        <span class="text-[11px] font-mono font-bold text-slate-400">${prod.codigo}</span>
-        <h3 class="font-bold text-sm text-slate-800 leading-snug mt-0.5">${prod.nombre}</h3>
+  <!-- PANTALLA DE INICIO DE SESIÓN (FIREBASE AUTH) -->
+  <div id="pantalla-login" class="fixed inset-0 bg-slate-900 z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6">
+      <div class="text-center mb-6">
+        <span class="bg-amber-500 text-slate-900 font-black px-3 py-1.5 rounded-lg text-lg">MF</span>
+        <h2 class="text-xl font-black text-slate-800 mt-3">MacgyFerre POS</h2>
+        <p class="text-xs text-slate-500">Ingresa tus credenciales según tu puesto</p>
       </div>
-      <div class="flex justify-between items-center mt-3 pt-2 border-t border-slate-200">
-        <span class="font-black text-emerald-700 text-base">Q ${Number(prod.precio).toFixed(2)}</span>
-        <span class="text-xs px-2 py-0.5 rounded font-semibold ${
-          prod.stock <= prod.minimo ? "bg-red-100 text-red-700" : "bg-slate-200 text-slate-700"
-        }">Stock: ${prod.stock}</span>
-      </div>
-    `;
-
-    card.onclick = () => agregarAlCarrito(prod.id);
-    grid.appendChild(card);
-  });
-}
-
-document.getElementById("buscador-pos").addEventListener("input", (e) => {
-  renderCatalogoPOS(e.target.value);
-});
-
-function agregarAlCarrito(idProducto) {
-  const prod = productos.find(p => p.id === idProducto);
-  if (!prod || prod.stock <= 0) return;
-
-  const itemEnCarrito = carrito.find(item => item.id === idProducto);
-  if (itemEnCarrito) {
-    if (itemEnCarrito.cantidad < prod.stock) {
-      itemEnCarrito.cantidad++;
-    } else {
-      alert(`Solo hay ${prod.stock} unidades disponibles en inventario.`);
-    }
-  } else {
-    carrito.push({
-      id: prod.id,
-      nombre: prod.nombre,
-      costo: Number(prod.costo),
-      precio: Number(prod.precio),
-      cantidad: 1
-    });
-  }
-  renderCarrito();
-}
-
-function quitarDelCarrito(idProducto) {
-  carrito = carrito.filter(item => item.id !== idProducto);
-  renderCarrito();
-}
-
-function renderCarrito() {
-  const contenedor = document.getElementById("lista-carrito");
-  if (carrito.length === 0) {
-    contenedor.innerHTML = `<p class="text-sm text-slate-400 text-center py-8">El carrito está vacío. Selecciona productos.</p>`;
-    document.getElementById("total-carrito").textContent = "Q 0.00";
-    calcularVuelto();
-    return;
-  }
-
-  contenedor.innerHTML = "";
-  let total = 0;
-
-  carrito.forEach(item => {
-    const subtotal = item.precio * item.cantidad;
-    total += subtotal;
-
-    const fila = document.createElement("div");
-    fila.className = "flex justify-between items-center bg-slate-50 p-2.5 rounded border border-slate-200 text-sm";
-    fila.innerHTML = `
-      <div class="pr-2">
-        <p class="font-bold text-slate-800 leading-tight">${item.nombre}</p>
-        <p class="text-xs text-slate-500">${item.cantidad} x Q ${item.precio.toFixed(2)}</p>
-      </div>
-      <div class="flex items-center gap-2">
-        <span class="font-bold text-slate-800">Q ${subtotal.toFixed(2)}</span>
-        <button type="button" onclick="quitarDelCarrito('${item.id}')" class="text-red-600 hover:bg-red-100 px-2 py-0.5 rounded font-bold">X</button>
-      </div>
-    `;
-    contenedor.appendChild(fila);
-  });
-
-  document.getElementById("total-carrito").textContent = `Q ${total.toFixed(2)}`;
-  calcularVuelto();
-}
-
-// =========================================================
-// 5. LÓGICA DE COBRO, VUELTO Y GENERACIÓN DE TICKET EN NUBE
-// =========================================================
-const selectMetodoPago = document.getElementById("metodo-pago");
-const inputEfectivo = document.getElementById("input-efectivo");
-
-selectMetodoPago.addEventListener("change", () => {
-  const metodo = selectMetodoPago.value;
-  document.getElementById("box-efectivo").classList.toggle("hidden", metodo !== "Efectivo");
-  document.getElementById("box-cliente-fiado").classList.toggle("hidden", metodo !== "Credito");
-});
-
-function calcularVuelto() {
-  const total = carrito.reduce((sum, item) => sum + item.precio * item.cantidad, 0);
-  const recibido = parseFloat(inputEfectivo.value) || 0;
-  const vuelto = recibido - total;
-  const spanVuelto = document.getElementById("texto-vuelto");
-
-  if (recibido > 0 && vuelto >= 0) {
-    spanVuelto.textContent = `Q ${vuelto.toFixed(2)}`;
-    spanVuelto.className = "text-emerald-700 font-black";
-  } else if (recibido > 0 && vuelto < 0) {
-    spanVuelto.textContent = `Faltan Q ${Math.abs(vuelto).toFixed(2)}`;
-    spanVuelto.className = "text-red-600 font-black";
-  } else {
-    spanVuelto.textContent = "Q 0.00";
-    spanVuelto.className = "text-blue-700";
-  }
-}
-
-inputEfectivo.addEventListener("input", calcularVuelto);
-
-document.getElementById("btn-cobrar").addEventListener("click", async () => {
-  if (carrito.length === 0) {
-    alert("Agrega al menos un producto al carrito antes de cobrar.");
-    return;
-  }
-
-  const totalVenta = carrito.reduce((sum, item) => sum + item.precio * item.cantidad, 0);
-  const totalCosto = carrito.reduce((sum, item) => sum + item.costo * item.cantidad, 0);
-  const metodo = selectMetodoPago.value;
-  const nombreCliente = document.getElementById("input-cliente-fiado").value.trim();
-
-  if (metodo === "Efectivo") {
-    const recibido = parseFloat(inputEfectivo.value) || 0;
-    if (recibido < totalVenta) {
-      alert("El efectivo recibido es menor al total a cobrar.");
-      return;
-    }
-  }
-
-  if (metodo === "Credito" && !nombreCliente) {
-    alert("Por favor escribe el nombre del cliente para anotar el fiado.");
-    return;
-  }
-
-  const btnCobrar = document.getElementById("btn-cobrar");
-  btnCobrar.disabled = true;
-  btnCobrar.textContent = "GUARDANDO EN LA NUBE...";
-
-  try {
-    // 1. Descontar inventario en Firestore
-    for (const item of carrito) {
-      const prodActual = productos.find(p => p.id === item.id);
-      if (prodActual) {
-        const nuevoStock = Math.max(0, prodActual.stock - item.cantidad);
-        await updateDoc(doc(db, "productos", item.id), { stock: nuevoStock });
-      }
-    }
-
-    // 2. Registrar la venta en Firestore
-    const nuevaVenta = {
-      timestamp: Date.now(),
-      fecha: new Date().toLocaleString("es-GT"),
-      items: [...carrito],
-      total: totalVenta,
-      costoTotal: totalCosto,
-      ganancia: totalVenta - totalCosto,
-      metodo: metodo,
-      cliente: metodo === "Credito" ? nombreCliente : "Consumidor Final"
-    };
-    await addDoc(collection(db, "ventas"), nuevaVenta);
-
-    // 3. Si es crédito/fiado, actualizar o crear cuenta en Firestore
-    if (metodo === "Credito") {
-      const clienteExistente = fiados.find(f => f.cliente.toLowerCase() === nombreCliente.toLowerCase());
-      if (clienteExistente) {
-        await updateDoc(doc(db, "fiados", clienteExistente.id), {
-          saldo: Number(clienteExistente.saldo) + totalVenta,
-          ultimaFecha: nuevaVenta.fecha
-        });
-      } else {
-        await addDoc(collection(db, "fiados"), {
-          cliente: nombreCliente,
-          saldo: totalVenta,
-          ultimaFecha: nuevaVenta.fecha
-        });
-      }
-    }
-
-    mostrarModalTicket(nuevaVenta);
-
-    carrito = [];
-    inputEfectivo.value = "";
-    document.getElementById("input-cliente-fiado").value = "";
-    renderCarrito();
-  } catch (error) {
-    console.error("Error al procesar venta:", error);
-    alert("Ocurrió un error al guardar en Firestore. Verifica tu sesión y conexión.");
-  } finally {
-    btnCobrar.disabled = false;
-    btnCobrar.textContent = "COBRAR Y GENERAR TICKET";
-  }
-});
-
-function mostrarModalTicket(venta) {
-  document.getElementById("ticket-fecha").textContent = `${venta.fecha} | Pago: ${venta.metodo}`;
-  const detalle = document.getElementById("ticket-detalle");
-  detalle.innerHTML = venta.items.map(i => `
-    <div class="flex justify-between">
-      <span>${i.cantidad}x ${i.nombre}</span>
-      <span>Q ${(i.precio * i.cantidad).toFixed(2)}</span>
-    </div>
-  `).join("");
-  document.getElementById("ticket-total").textContent = `Q ${venta.total.toFixed(2)}`;
-  document.getElementById("modal-ticket").classList.remove("hidden");
-}
-
-function cerrarModalTicket() {
-  document.getElementById("modal-ticket").classList.add("hidden");
-}
-
-// =========================================================
-// 6. MÓDULO 2: CONTROL DE INVENTARIO EN FIRESTORE
-// =========================================================
-document.getElementById("btn-abrir-form-producto").addEventListener("click", () => {
-  document.getElementById("form-producto").classList.toggle("hidden");
-});
-
-document.getElementById("form-producto").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  if (rolActual !== "admin") {
-    alert("Solo el Administrador puede agregar nuevos productos.");
-    return;
-  }
-
-  const nuevoProd = {
-    codigo: document.getElementById("prod-codigo").value.trim().toUpperCase(),
-    nombre: document.getElementById("prod-nombre").value.trim(),
-    costo: parseFloat(document.getElementById("prod-costo").value),
-    precio: parseFloat(document.getElementById("prod-precio").value),
-    stock: parseInt(document.getElementById("prod-stock").value),
-    minimo: 5
-  };
-
-  await addDoc(collection(db, "productos"), nuevoProd);
-  e.target.reset();
-  e.target.classList.add("hidden");
-});
-
-function renderTablaInventario() {
-  const tbody = document.getElementById("tabla-inventario");
-  const thCosto = document.querySelector(".col-costo");
-  if (thCosto) thCosto.classList.toggle("hidden", rolActual !== "admin");
-
-  tbody.innerHTML = productos.map(p => {
-    const bajo = p.stock <= p.minimo;
-    return `
-      <tr class="hover:bg-slate-50">
-        <td class="p-3 font-mono text-xs font-bold text-slate-500">${p.codigo}</td>
-        <td class="p-3 font-semibold text-slate-800">${p.nombre}</td>
-        <td class="p-3 text-slate-600 ${rolActual !== "admin" ? "hidden" : ""}">Q ${Number(p.costo).toFixed(2)}</td>
-        <td class="p-3 font-bold text-emerald-700">Q ${Number(p.precio).toFixed(2)}</td>
-        <td class="p-3 font-bold">${p.stock} uds</td>
-        <td class="p-3">
-          <span class="px-2 py-1 rounded text-xs font-bold ${
-            bajo ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"
-          }">${bajo ? "Stock Bajo" : "Óptimo"}</span>
-        </td>
-      </tr>
-    `;
-  }).join("");
-}
-
-// =========================================================
-// 7. MÓDULO 3: CLIENTES Y FIADOS EN FIRESTORE
-// =========================================================
-function renderFiados() {
-  const contenedor = document.getElementById("lista-fiados");
-  const activos = fiados.filter(f => Number(f.saldo) > 0);
-
-  if (activos.length === 0) {
-    contenedor.innerHTML = `<p class="text-sm text-slate-400 col-span-full py-6 text-center">No hay clientes con saldo pendiente.</p>`;
-    return;
-  }
-
-  contenedor.innerHTML = activos.map(f => `
-    <div class="border border-slate-200 rounded-xl p-4 bg-slate-50 flex flex-col justify-between">
-      <div>
-        <div class="flex justify-between items-start">
-          <h3 class="font-bold text-base text-slate-800">${f.cliente}</h3>
-          <span class="bg-amber-100 text-amber-800 text-xs font-bold px-2 py-0.5 rounded">Pendiente</span>
+      <form id="form-login" class="space-y-4">
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Correo del Empleado</label>
+          <input type="email" id="login-email" required placeholder="ejemplo@macgyferre.com"
+            class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500" />
         </div>
-        <p class="text-xs text-slate-400 mt-1">Último movimiento: ${f.ultimaFecha}</p>
-        <p class="text-2xl font-black text-red-600 mt-3">Q ${Number(f.saldo).toFixed(2)}</p>
-      </div>
-      <button type="button" onclick="registrarAbono('${f.id}')" class="mt-4 w-full bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold py-2 rounded-lg">
-        Registrar Abono
-      </button>
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Contraseña</label>
+          <input type="password" id="login-password" required placeholder="••••••••"
+            class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500" />
+        </div>
+        <p id="login-error" class="text-xs text-red-600 font-semibold hidden"></p>
+        <button type="submit" id="btn-login"
+          class="w-full bg-amber-500 hover:bg-amber-600 text-slate-900 font-black py-2.5 rounded-lg transition shadow-sm">
+          INGRESAR AL SISTEMA
+        </button>
+      </form>
     </div>
-  `).join("");
-}
+  </div>
 
-async function registrarAbono(idFiado) {
-  const cuenta = fiados.find(f => f.id === idFiado);
-  if (!cuenta) return;
-
-  const montoStr = prompt(`Saldo actual de ${cuenta.cliente}: Q ${Number(cuenta.saldo).toFixed(2)}\n¿Cuánto desea abonar (Q)?`);
-  const abono = parseFloat(montoStr);
-
-  if (isNaN(abono) || abono <= 0) return;
-  if (abono > Number(cuenta.saldo)) {
-    alert("El abono no puede ser mayor al saldo pendiente.");
-    return;
-  }
-
-  await updateDoc(doc(db, "fiados", idFiado), {
-    saldo: Number(cuenta.saldo) - abono,
-    ultimaFecha: new Date().toLocaleString("es-GT")
-  });
-}
-
-// =========================================================
-// 8. MÓDULO 4: CIERRE DE CAJA Y EXPORTAR EXCEL (CSV)
-// =========================================================
-function renderReportes() {
-  const totalVentas = ventas.reduce((sum, v) => sum + Number(v.total), 0);
-  const gananciaNeta = ventas.reduce((sum, v) => sum + Number(v.ganancia), 0);
-  const totalFiados = fiados.reduce((sum, f) => sum + Number(f.saldo), 0);
-
-  document.getElementById("rep-total-ventas").textContent = `Q ${totalVentas.toFixed(2)}`;
-  document.getElementById("rep-ganancia-neta").textContent = `Q ${gananciaNeta.toFixed(2)}`;
-  document.getElementById("rep-total-fiados").textContent = `Q ${totalFiados.toFixed(2)}`;
-
-  const historial = document.getElementById("historial-ventas");
-  if (ventas.length === 0) {
-    historial.innerHTML = `<p class="text-slate-400 text-center py-4">Aún no se han registrado ventas hoy.</p>`;
-    return;
-  }
-
-  historial.innerHTML = ventas.map(v => `
-    <div class="flex flex-wrap justify-between items-center p-3 bg-slate-50 rounded border border-slate-200">
-      <div>
-        <span class="font-bold text-slate-800">${v.cliente}</span>
-        <span class="text-xs text-slate-500 ml-2">${v.fecha}</span>
-        <p class="text-xs text-slate-600">${v.items.map(i => `${i.cantidad}x ${i.nombre}`).join(", ")}</p>
+  <!-- BARRA SUPERIOR (NAVBAR) -->
+  <header class="bg-slate-900 text-white shadow-md">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="bg-amber-500 text-slate-900 font-black px-3 py-1 rounded text-lg">MF</div>
+        <div>
+          <h1 class="font-bold text-lg leading-tight">MacgyFerre POS</h1>
+          <p class="text-xs text-slate-400">Sucursal: Matriz Escuintla</p>
+        </div>
       </div>
-      <div class="text-right">
-        <span class="font-black text-emerald-700">Q ${Number(v.total).toFixed(2)}</span>
-        <span class="block text-[11px] uppercase font-bold text-slate-400">${v.metodo}</span>
+
+      <!-- Puesto activo y botón de salida -->
+      <div class="flex items-center gap-3">
+        <span id="badge-puesto" class="bg-slate-800 text-amber-400 text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-700">
+          Cargando puesto...
+        </span>
+        <button type="button" id="btn-cerrar-sesion"
+          class="bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition">
+          Salir
+        </button>
       </div>
     </div>
-  `).join("");
-}
 
-document.getElementById("btn-exportar-csv").addEventListener("click", () => {
-  if (ventas.length === 0) {
-    alert("No hay ventas registradas para exportar.");
-    return;
-  }
+    <!-- MENÚ DE MÓDULOS -->
+    <nav class="bg-slate-800 border-t border-slate-700">
+      <div class="max-w-7xl mx-auto px-4 flex gap-2 overflow-x-auto py-2">
+        <button type="button" onclick="cambiarVista('pos')" id="tab-pos" class="tab-btn bg-amber-500 text-slate-900 font-bold px-4 py-2 rounded text-sm transition">
+          1. Caja Rápida (POS)
+        </button>
+        <button type="button" onclick="cambiarVista('inventario')" id="tab-inventario" class="tab-btn text-slate-300 hover:bg-slate-700 font-semibold px-4 py-2 rounded text-sm transition">
+          2. Inventario
+        </button>
+        <button type="button" onclick="cambiarVista('fiados')" id="tab-fiados" class="tab-btn text-slate-300 hover:bg-slate-700 font-semibold px-4 py-2 rounded text-sm transition">
+          3. Clientes / Fiados
+        </button>
+        <button type="button" onclick="cambiarVista('reportes')" id="tab-reportes" class="tab-btn text-slate-300 hover:bg-slate-700 font-semibold px-4 py-2 rounded text-sm transition">
+          4. Cierre de Caja (Admin)
+        </button>
+      </div>
+    </nav>
+  </header>
 
-  let csv = "Fecha,Cliente,Metodo Pago,Total (Q),Ganancia (Q)\n";
-  ventas.forEach(v => {
-    csv += `"${v.fecha}","${v.cliente}","${v.metodo}",${Number(v.total).toFixed(2)},${Number(v.ganancia).toFixed(2)}\n`;
-  });
+  <!-- CONTENIDO PRINCIPAL DE VISTAS -->
+  <main class="max-w-7xl w-full mx-auto px-4 py-6 flex-1">
 
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(blob);
-  link.download = `Cierre_MacgyFerre_${new Date().toISOString().slice(0, 10)}.csv`;
-  link.click();
-});
+    <!-- MÓDULO 1: CAJA RÁPIDA (POS) -->
+    <section id="vista-pos" class="vista-modulo grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div class="lg:col-span-2 bg-white p-5 rounded-xl shadow-sm border border-slate-200">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+          <h2 class="text-xl font-bold text-slate-800">Catálogo de Productos</h2>
+          <input type="text" id="buscador-pos" placeholder="Buscar por nombre o código (ej. Cemento, Martillo)..."
+            class="w-full sm:w-80 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none" />
+        </div>
+        <div id="grid-productos-pos" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3"></div>
+      </div>
 
-// Exponer funciones al ámbito global para los botones onclick del HTML
-window.cambiarVista = cambiarVista;
-window.quitarDelCarrito = quitarDelCarrito;
-window.cerrarModalTicket = cerrarModalTicket;
-window.registrarAbono = registrarAbono;
+      <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 flex flex-col justify-between">
+        <div>
+          <h2 class="text-xl font-bold text-slate-800 border-b pb-3 mb-3">Orden Actual</h2>
+          <div id="lista-carrito" class="space-y-2 max-h-80 overflow-y-auto mb-4">
+            <p class="text-sm text-slate-400 text-center py-8">El carrito está vacío. Selecciona productos.</p>
+          </div>
+        </div>
+
+        <div class="border-t pt-4 space-y-3">
+          <div class="flex justify-between text-lg font-black">
+            <span>TOTAL A COBRAR:</span>
+            <span id="total-carrito" class="text-emerald-700">Q 0.00</span>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-600 uppercase mb-1">Método de Pago</label>
+            <select id="metodo-pago" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-semibold">
+              <option value="Efectivo">Efectivo</option>
+              <option value="Transferencia">Transferencia Bancaria</option>
+              <option value="Credito">Crédito / Fiado (Anotar a cliente)</option>
+            </select>
+          </div>
+
+          <div id="box-efectivo">
+            <label class="block text-xs font-bold text-slate-600 uppercase mb-1">Efectivo Recibido (Q)</label>
+            <input type="number" id="input-efectivo" placeholder="0.00"
+              class="w-full border border-slate-300 rounded-lg px-3 py-2 text-base font-bold" />
+            <p class="text-sm font-bold text-slate-600 mt-1">Vuelto: <span id="texto-vuelto" class="text-blue-700">Q 0.00</span></p>
+          </div>
+
+          <div id="box-cliente-fiado" class="hidden">
+            <label class="block text-xs font-bold text-slate-600 uppercase mb-1">Nombre del Cliente</label>
+            <input type="text" id="input-cliente-fiado" placeholder="Ej. Don Carlos (Albañil)"
+              class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+          </div>
+
+          <button type="button" id="btn-cobrar" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg text-base shadow transition">
+            COBRAR Y GENERAR TICKET
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- MÓDULO 2: INVENTARIO -->
+    <section id="vista-inventario" class="vista-modulo hidden bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+      <div class="flex flex-wrap justify-between items-center gap-4 mb-6">
+        <div>
+          <h2 class="text-xl font-bold text-slate-800">Control de Inventario</h2>
+          <p class="text-sm text-slate-500">Gestiona existencias, costos y alertas de reposición</p>
+        </div>
+        <button type="button" id="btn-abrir-form-producto" class="bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold px-4 py-2 rounded-lg text-sm">
+          + Agregar Producto
+        </button>
+      </div>
+
+      <form id="form-producto" class="hidden bg-slate-50 p-4 rounded-lg border border-slate-200 mb-6 grid grid-cols-1 sm:grid-cols-5 gap-3">
+        <input type="text" id="prod-codigo" placeholder="Código (ej. FER-01)" required class="border rounded px-3 py-2 text-sm" />
+        <input type="text" id="prod-nombre" placeholder="Nombre del producto" required class="border rounded px-3 py-2 text-sm" />
+        <input type="number" step="0.01" id="prod-costo" placeholder="Costo compra (Q)" required class="border rounded px-3 py-2 text-sm" />
+        <input type="number" step="0.01" id="prod-precio" placeholder="Precio venta (Q)" required class="border rounded px-3 py-2 text-sm" />
+        <div class="flex gap-2">
+          <input type="number" id="prod-stock" placeholder="Stock" required class="w-full border rounded px-3 py-2 text-sm" />
+          <button type="submit" class="bg-emerald-600 text-white font-bold px-4 py-2 rounded text-sm">Guardar</button>
+        </div>
+      </form>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse text-sm">
+          <thead>
+            <tr class="bg-slate-100 border-b border-slate-200 text-slate-600 uppercase text-xs">
+              <th class="p-3">Código</th>
+              <th class="p-3">Producto</th>
+              <th class="p-3 col-costo">Costo (Q)</th>
+              <th class="p-3">Precio Venta (Q)</th>
+              <th class="p-3">Stock</th>
+              <th class="p-3">Estado</th>
+            </tr>
+          </thead>
+          <tbody id="tabla-inventario" class="divide-y divide-slate-100"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- MÓDULO 3: CLIENTES Y FIADOS -->
+    <section id="vista-fiados" class="vista-modulo hidden bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+      <h2 class="text-xl font-bold text-slate-800 mb-1">Cuentas por Cobrar (Fiados)</h2>
+      <p class="text-sm text-slate-500 mb-6">Control de créditos otorgados en mostrador y registro de abonos</p>
+      <div id="lista-fiados" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+    </section>
+
+    <!-- MÓDULO 4: CIERRE DE CAJA Y REPORTES -->
+    <section id="vista-reportes" class="vista-modulo hidden space-y-6">
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+          <p class="text-xs font-bold text-slate-500 uppercase">Ventas Totales Hoy</p>
+          <p id="rep-total-ventas" class="text-3xl font-black text-slate-800 mt-1">Q 0.00</p>
+        </div>
+        <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+          <p class="text-xs font-bold text-slate-500 uppercase">Ganancia Neta Estimada</p>
+          <p id="rep-ganancia-neta" class="text-3xl font-black text-emerald-700 mt-1">Q 0.00</p>
+        </div>
+        <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+          <p class="text-xs font-bold text-slate-500 uppercase">Por Cobrar (Fiados)</p>
+          <p id="rep-total-fiados" class="text-3xl font-black text-amber-600 mt-1">Q 0.00</p>
+        </div>
+      </div>
+
+      <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="text-lg font-bold">Historial de Ventas del Día</h3>
+          <button type="button" id="btn-exportar-csv" class="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded">
+            Descargar Excel / CSV
+          </button>
+        </div>
+        <div id="historial-ventas" class="space-y-2 text-sm"></div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- MODAL DE TICKET DE VENTA -->
+  <div id="modal-ticket" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-40">
+    <div class="bg-white w-full max-w-sm p-6 rounded-lg shadow-xl font-mono text-xs">
+      <div class="text-center border-b border-dashed pb-3 mb-3">
+        <h3 class="font-bold text-base">MACGYFERRE FERRETERÍA</h3>
+        <p>Matriz Escuintla, Guatemala</p>
+        <p id="ticket-fecha"></p>
+      </div>
+      <div id="ticket-detalle" class="space-y-1 border-b border-dashed pb-3 mb-3"></div>
+      <div class="flex justify-between font-bold text-sm mb-4">
+        <span>TOTAL:</span>
+        <span id="ticket-total"></span>
+      </div>
+      <p class="text-center text-slate-500 mb-4">¡Gracias por su compra!</p>
+      <div class="flex gap-2 no-imprimir">
+        <button type="button" onclick="window.print()" class="flex-1 bg-slate-800 text-white py-2 rounded font-sans font-bold">Imprimir</button>
+        <button type="button" onclick="cerrarModalTicket()" class="flex-1 bg-slate-200 text-slate-800 py-2 rounded font-sans font-bold">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
