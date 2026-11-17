@@ -1,0 +1,24 @@
+/* Transiciones suaves y utilidades base */
+.vista-oculta {
+  display: none !important;
+}
+
+/* Estilos exclusivos cuando se manda a imprimir el ticket */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #modal-ticket, #modal-ticket * {
+    visibility: visible;
+  }
+  #modal-ticket {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    box-shadow: none !important;
+  }
+  .no-imprimir {
+    display: none !important;
+  }
+}
