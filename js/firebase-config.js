@@ -1,14 +1,17 @@
+
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 const firebaseConfig = {
-  apiKey: "PEGA_AQUI_TU_API_KEY",
+  apiKey: "AIzaSyCXCk41WyhTq2tq2AgRfxKT-rrpolaGWoA",
   authDomain: "macgyferre-pos.firebaseapp.com",
+  databaseURL: "https://macgyferre-pos-default-rtdb.firebaseio.com",
   projectId: "macgyferre-pos",
   storageBucket: "macgyferre-pos.firebasestorage.app",
-  messagingSenderId: "PEGA_AQUI_TU_SENDER_ID",
-  appId: "PEGA_AQUI_TU_APP_ID"
+  messagingSenderId: "995241054253",
+  appId: "1:995241054253:web:488a1ca4579e7b2e5428a4",
+  measurementId: "G-9NT2WQKS4X"
 };
 
 const app = initializeApp(firebaseConfig);
